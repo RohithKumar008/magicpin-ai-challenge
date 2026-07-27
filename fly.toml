@@ -1,0 +1,23 @@
+app = "vera-bot"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LLM_PROVIDER = "nvidia"
+  LLM_MODEL = "meta/llama-3.2-3b-instruct"
+  TEAM_NAME = "Team Vera"
+  BOT_VERSION = "1.0.0"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  [services.concurrency]
+    hard_limit = 25
+    soft_limit = 10
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
