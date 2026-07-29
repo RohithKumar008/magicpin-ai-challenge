@@ -21,16 +21,16 @@ Author: magicpin AI Challenge Team
 # =============================================================================
 
 # Your bot's URL (where your bot is running)
-BOT_URL = "https://magicpin-ai-challenge-q8ra.onrender.com"
+BOT_URL = "http://localhost:8082"
 
 # Choose your LLM provider: "openai", "anthropic", "gemini", "deepseek", "groq", "ollama", "openrouter", "nvidia"
-LLM_PROVIDER = "nvidia"
+LLM_PROVIDER = "groq"
 
-# Your API key (paste your key here)
-LLM_API_KEY = "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"  # <-- PUT YOUR API KEY HERE
+# Your API key (paste your key here, or set LLM_API_KEY env var)
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # <-- PUT YOUR API KEY HERE OR SET ENV VAR
 
 # Model to use (leave empty for default, or specify like "gpt-4o", "claude-3-5-sonnet-20241022", etc.)
-LLM_MODEL = "meta/llama-3.2-3b-instruct"  # <-- Optional: specify model or leave empty for default
+LLM_MODEL = "llama-3.3-70b-versatile"  # <-- Optional: specify model or leave empty for default
 
 # For Ollama only: local server URL
 OLLAMA_URL = "http://localhost:11434"
@@ -257,26 +257,38 @@ class DeepSeekProvider(LLMProvider):
 class GroqProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = ""):
         self.api_key = api_key
-        self.model = model or "llama-3.1-70b-versatile"
+        self.model = model or "llama-3.3-70b-versatile"
 
     def name(self) -> str:
         return f"Groq ({self.model})"
 
     def complete(self, prompt: str, system: str = None) -> str:
+        import time as _time
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        req = urlrequest.Request(
-            "https://api.groq.com/openai/v1/chat/completions",
-            data=json.dumps({"model": self.model, "messages": messages,
-                            "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        )
-        resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM)
-        data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"]
+        for attempt in range(3):
+            req = urlrequest.Request(
+                "https://api.groq.com/openai/v1/chat/completions",
+                data=json.dumps({"model": self.model, "messages": messages,
+                                "temperature": 0.2, "max_tokens": 1500}).encode("utf-8"),
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json",
+                         "User-Agent": "VeraBot/1.0"}
+            )
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            try:
+                resp = urlrequest.urlopen(req, timeout=TIMEOUT_LLM, context=ctx)
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["choices"][0]["message"]["content"]
+            except urlerror.HTTPError as e:
+                if e.code == 429 and attempt < 2:
+                    _time.sleep(3 * (attempt + 1))
+                    continue
+                raise
 
 
 class OllamaProvider(LLMProvider):
@@ -422,6 +434,9 @@ class DatasetLoader:
 class BotClient:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self._ctx = ssl.create_default_context()
+        self._ctx.check_hostname = False
+        self._ctx.verify_mode = ssl.CERT_NONE
 
     def _request(self, method: str, path: str, timeout: int = 30,
                  body_dict: Dict = None) -> Tuple[Optional[Dict], Optional[str], float]:
@@ -432,7 +447,7 @@ class BotClient:
         req = urlrequest.Request(url, data=body, method=method, headers=headers)
 
         try:
-            resp = urlrequest.urlopen(req, timeout=timeout)
+            resp = urlrequest.urlopen(req, timeout=timeout, context=self._ctx)
             return json.loads(resp.read().decode("utf-8")), None, (time.time() - start) * 1000
         except urlerror.HTTPError as e:
             latency = (time.time() - start) * 1000
@@ -458,12 +473,12 @@ class BotClient:
         })
 
     def tick(self, triggers):
-        return self._request("POST", "/v1/tick", 15, {
+        return self._request("POST", "/v1/tick", 120, {
             "now": datetime.utcnow().isoformat() + "Z", "available_triggers": triggers
         })
 
     def reply(self, conv_id, merchant_id, message, turn):
-        return self._request("POST", "/v1/reply", 15, {
+        return self._request("POST", "/v1/reply", 60, {
             "conversation_id": conv_id, "merchant_id": merchant_id, "customer_id": None,
             "from_role": "merchant", "message": message,
             "received_at": datetime.utcnow().isoformat() + "Z", "turn_number": turn

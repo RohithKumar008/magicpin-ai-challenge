@@ -26,6 +26,8 @@ def call_llm(system_prompt: str, user_prompt: str, temperature: float = 0.0, max
         return _call_nvidia(system_prompt, user_prompt, temperature, max_tokens)
     elif LLM_PROVIDER == "openrouter":
         return _call_openrouter(system_prompt, user_prompt, temperature, max_tokens)
+    elif LLM_PROVIDER == "groq":
+        return _call_groq(system_prompt, user_prompt, temperature, max_tokens)
     else:
         return _call_openai(system_prompt, user_prompt, temperature, max_tokens)
 
@@ -74,6 +76,22 @@ def _call_openrouter(system: str, user: str, temp: float, max_tok: int) -> str:
                 continue
             raise
     raise urlerror.HTTPError(url, 429, "Rate limited after retries", {}, None)
+
+def _call_groq(system: str, user: str, temp: float, max_tok: int) -> str:
+    model = LLM_MODEL or "llama-3.3-70b-versatile"
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    body = json.dumps({
+        "model": model, "temperature": temp, "max_tokens": max_tok,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    }).encode()
+    req = urlrequest.Request(
+        url, data=body,
+        headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json",
+                 "User-Agent": "VeraBot/1.0"}
+    )
+    resp = urlrequest.urlopen(req, timeout=25, context=_ctx())
+    data = json.loads(resp.read().decode())
+    return data["choices"][0]["message"]["content"]
 
 AVAILABLE_NVIDIA = [
     "meta/llama-3.2-3b-instruct",
