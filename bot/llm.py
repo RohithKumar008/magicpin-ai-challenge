@@ -1,7 +1,7 @@
 import json
 import ssl
-from urllib import request as urlrequest
-from bot.config import LLM_PROVIDER, LLM_API_KEY, LLM_MODEL, OLLAMA_URL
+from urllib import request as urlrequest, error as urlerror
+from bot.config import LLM_PROVIDER, LLM_API_KEY, LLM_MODEL, OLLAMA_URL, OPENROUTER_API_KEY
 
 TIMEOUT = 45
 
@@ -24,6 +24,8 @@ def call_llm(system_prompt: str, user_prompt: str, temperature: float = 0.0, max
         return _call_gemini(system_prompt, user_prompt, temperature, max_tokens)
     elif LLM_PROVIDER == "nvidia":
         return _call_nvidia(system_prompt, user_prompt, temperature, max_tokens)
+    elif LLM_PROVIDER == "openrouter":
+        return _call_openrouter(system_prompt, user_prompt, temperature, max_tokens)
     else:
         return _call_openai(system_prompt, user_prompt, temperature, max_tokens)
 
@@ -45,6 +47,33 @@ def _call_openai_compat(base_url: str, system: str, user: str, temp: float, max_
 
 def _call_openai(system: str, user: str, temp: float, max_tok: int) -> str:
     return _call_openai_compat("https://api.openai.com/v1", system, user, temp, max_tok)
+
+def _call_openrouter(system: str, user: str, temp: float, max_tok: int) -> str:
+    import time as _time
+    model = LLM_MODEL or "google/gemma-4-26b-a4b-it:free"
+    key = OPENROUTER_API_KEY or LLM_API_KEY
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    body = json.dumps({
+        "model": model, "temperature": temp, "max_tokens": max_tok,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    }).encode()
+    for attempt in range(3):
+        req = urlrequest.Request(
+            url, data=body,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
+                     "HTTP-Referer": "https://github.com/RohithKumar008/magicpin-ai-challenge",
+                     "X-Title": "Vera AI Bot"}
+        )
+        try:
+            resp = urlrequest.urlopen(req, timeout=45, context=_ctx())
+            data = json.loads(resp.read().decode())
+            return data["choices"][0]["message"]["content"]
+        except urlerror.HTTPError as e:
+            if e.code == 429 and attempt < 2:
+                _time.sleep(2 * (attempt + 1))
+                continue
+            raise
+    raise urlerror.HTTPError(url, 429, "Rate limited after retries", {}, None)
 
 AVAILABLE_NVIDIA = [
     "meta/llama-3.2-3b-instruct",
