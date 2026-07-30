@@ -27,10 +27,10 @@ BOT_URL = "http://localhost:8082"
 LLM_PROVIDER = "nvidia"
 
 # Your API key (paste your key here)
-LLM_API_KEY = "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"  # <-- PUT YOUR API KEY HERE
+LLM_API_KEY = "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"  # <-- PUT YOUR API KEY HERE
 
 # Model to use (leave empty for default, or specify like "gpt-4o", "claude-3-5-sonnet-20241022", etc.)
-LLM_MODEL = "meta/llama-3.2-3b-instruct"  # <-- Optional: specify model or leave empty for default
+LLM_MODEL = "meta/llama-3.1-8b-instruct"  # <-- Optional: specify model or leave empty for default
 
 # For Ollama only: local server URL
 OLLAMA_URL = "http://localhost:11434"
@@ -57,7 +57,7 @@ from urllib import request as urlrequest, error as urlerror
 from abc import ABC, abstractmethod
 
 # Constants
-TIMEOUT_LLM = 45
+TIMEOUT_LLM = 90
 DATASET_DIR = Path(__file__).parent / "dataset"
 
 # =============================================================================
@@ -685,6 +685,12 @@ class JudgeSimulator:
             short_id = mid.split('_')[1] if '_' in mid else mid[:10]
             print(f"  [{status}] merchant/{short_id}")
 
+        for cid, c in list(self.dataset.customers.items())[:5]:
+            data, err, _ = self.client.push_context("customer", cid, 1, c)
+            status = "PASS" if data and data.get("accepted") else "FAIL"
+            short_id = cid.split('_')[1] if '_' in cid else cid[:10]
+            print(f"  [{status}] customer/{short_id}")
+
         return True
 
     def _phase2_short(self) -> bool:
@@ -842,6 +848,8 @@ class JudgeSimulator:
 
         for mid, m in self.dataset.merchants.items():
             self.client.push_context("merchant", mid, 1, m)
+        for cid, c in self.dataset.customers.items():
+            self.client.push_context("customer", cid, 1, c)
         for tid, t in self.dataset.triggers.items():
             self.client.push_context("trigger", tid, 1, t)
 
