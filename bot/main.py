@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
@@ -85,30 +86,28 @@ async def push_context(body: CtxBody):
 
 @app.post("/v1/tick")
 async def tick(body: TickBody):
-    actions = []
-
-    for trigger_id in body.available_triggers:
+    async def process_trigger(trigger_id: str):
         trigger = context_store.get_trigger(trigger_id)
         if not trigger:
-            continue
+            return None
 
         merchant_id = trigger.get("merchant_id")
         merchant = context_store.get_by_merchant_id(merchant_id)
         if not merchant:
-            continue
+            return None
 
         category = context_store.get_merchant_category(merchant)
         if not category:
-            continue
+            return None
 
         customer_id = trigger.get("customer_id")
         customer = context_store.get_merchant_customer(merchant_id, customer_id) if customer_id else None
 
-        conv_id = f"conv_{merchant_id}_{trigger_id}_{uuid.uuid4().hex[:8]}"
-
-        result = compose(category, merchant, trigger, customer)
+        result = await asyncio.to_thread(compose, category, merchant, trigger, customer)
         if not result.get("body"):
-            continue
+            return None
+
+        conv_id = f"conv_{merchant_id}_{trigger_id}_{uuid.uuid4().hex[:8]}"
 
         conversation_store[conv_id] = {
             "turns": [],
@@ -117,7 +116,7 @@ async def tick(body: TickBody):
         }
         sent_bodies.setdefault(conv_id, set()).add(result["body"].strip().lower())
 
-        actions.append({
+        return {
             "conversation_id": conv_id,
             "merchant_id": merchant_id,
             "customer_id": customer_id,
@@ -129,8 +128,11 @@ async def tick(body: TickBody):
             "cta": result.get("cta", "open_ended"),
             "suppression_key": result.get("suppression_key", trigger.get("suppression_key", "")),
             "rationale": result.get("rationale", "Composed from context"),
-        })
+        }
 
+    tasks = [process_trigger(tid) for tid in body.available_triggers]
+    results = await asyncio.gather(*tasks)
+    actions = [r for r in results if r is not None]
     return {"actions": actions}
 
 @app.post("/v1/reply")

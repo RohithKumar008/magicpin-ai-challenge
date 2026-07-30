@@ -57,7 +57,7 @@ from urllib import request as urlrequest, error as urlerror
 from abc import ABC, abstractmethod
 
 # Constants
-TIMEOUT_LLM = 45
+TIMEOUT_LLM = 90
 DATASET_DIR = Path(__file__).parent / "dataset"
 
 # =============================================================================
@@ -700,6 +700,12 @@ class JudgeSimulator:
             short_id = mid.split('_')[1] if '_' in mid else mid[:10]
             print(f"  [{status}] merchant/{short_id}")
 
+        for cid, c in list(self.dataset.customers.items())[:5]:
+            data, err, _ = self.client.push_context("customer", cid, 1, c)
+            status = "PASS" if data and data.get("accepted") else "FAIL"
+            short_id = cid.split('_')[1] if '_' in cid else cid[:10]
+            print(f"  [{status}] customer/{short_id}")
+
         return True
 
     def _phase2_short(self) -> bool:
@@ -857,6 +863,8 @@ class JudgeSimulator:
 
         for mid, m in self.dataset.merchants.items():
             self.client.push_context("merchant", mid, 1, m)
+        for cid, c in self.dataset.customers.items():
+            self.client.push_context("customer", cid, 1, c)
         for tid, t in self.dataset.triggers.items():
             self.client.push_context("trigger", tid, 1, t)
 
